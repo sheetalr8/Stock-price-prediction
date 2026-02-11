@@ -13,16 +13,17 @@ st.set_page_config(page_title="AI Investment Dashboard", layout="wide")
 
 st.title("📈 AI Investment Advisor Dashboard")
 
-# ------------------------------
-# Sidebar Controls
-# ------------------------------
+# --------------------------------------------------
+# Sidebar
+# --------------------------------------------------
 
 st.sidebar.header("Controls")
 
 stock_list = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX",
-    "INTC", "AMD", "ORCL", "IBM", "ADBE", "CSCO", "QCOM",
-    "WMT", "KO", "PEP", "DIS", "BA", "JPM", "GS", "V", "MA",
+    "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA",
+    "NFLX", "INTC", "AMD", "ORCL", "IBM", "ADBE", "CSCO",
+    "QCOM", "WMT", "KO", "PEP", "DIS", "BA", "JPM",
+    "GS", "V", "MA",
     "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS",
     "ICICIBANK.NS", "SBIN.NS", "LT.NS", "ITC.NS"
 ]
@@ -34,15 +35,20 @@ model_choice = st.sidebar.selectbox(
     ["Logistic Regression", "Random Forest", "XGBoost"]
 )
 
-# ------------------------------
+# --------------------------------------------------
 # Download Data
-# ------------------------------
+# --------------------------------------------------
 
-data = yf.download(stock_symbol, period="2y")
+with st.spinner("Fetching stock data..."):
+    data = yf.download(stock_symbol, period="5y", progress=False)
 
-# ------------------------------
+if data.empty:
+    st.error("Failed to fetch stock data. Try another stock.")
+    st.stop()
+
+# --------------------------------------------------
 # Feature Engineering
-# ------------------------------
+# --------------------------------------------------
 
 data["Return"] = data["Close"].pct_change()
 data["MA10"] = data["Close"].rolling(10).mean()
@@ -60,25 +66,46 @@ avg_loss = loss.rolling(14).mean()
 rs = avg_gain / avg_loss
 data["RSI"] = 100 - (100 / (1 + rs))
 
-# Target
+# Target variable
 data["Target"] = np.where(data["Return"].shift(-1) > 0, 1, 0)
 
 data = data.dropna()
 
+# --------------------------------------------------
+# Safety Checks
+# --------------------------------------------------
+
+if len(data) < 200:
+    st.error("Not enough data to train model. Try another stock.")
+    st.stop()
+
 features = ["MA10", "MA50", "Volatility", "RSI"]
+
 X = data[features]
 y = data["Target"]
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, shuffle=False
-)
+if X.empty or y.empty:
+    st.error("Feature generation failed. Try another stock.")
+    st.stop()
 
-# ------------------------------
+# --------------------------------------------------
+# Train-Test Split
+# --------------------------------------------------
+
+try:
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, shuffle=False
+    )
+except ValueError:
+    st.error("Data split failed. Try another stock.")
+    st.stop()
+
+# --------------------------------------------------
 # Model Selection
-# ------------------------------
+# --------------------------------------------------
 
 if model_choice == "Logistic Regression":
-    model = LogisticRegression()
+    model = LogisticRegression(max_iter=1000)
 elif model_choice == "Random Forest":
     model = RandomForestClassifier()
 else:
@@ -86,51 +113,52 @@ else:
 
 model.fit(X_train, y_train)
 
-# Accuracy
+# --------------------------------------------------
+# Model Evaluation
+# --------------------------------------------------
+
 y_pred = model.predict(X_test)
 accuracy = accuracy_score(y_test, y_pred)
 
-# Tomorrow Prediction
 latest_features = X.iloc[-1].values.reshape(1, -1)
 prediction = model.predict(latest_features)[0]
 probability = model.predict_proba(latest_features)[0][prediction]
 
-# ------------------------------
-# Layout Columns
-# ------------------------------
+# --------------------------------------------------
+# Display Results
+# --------------------------------------------------
 
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("📊 Model Accuracy")
-    st.info(f"{round(accuracy*100,2)} %")
+    st.info(f"{round(accuracy * 100, 2)} %")
 
 with col2:
     st.subheader("🔮 Tomorrow Prediction")
-
     if prediction == 1:
-        st.success(f"📈 UP ({round(probability*100,2)}% confidence)")
+        st.success(f"📈 UP ({round(probability * 100, 2)}% confidence)")
     else:
-        st.error(f"📉 DOWN ({round(probability*100,2)}% confidence)")
+        st.error(f"📉 DOWN ({round(probability * 100, 2)}% confidence)")
 
-# ------------------------------
-# Buy / Sell Logic
-# ------------------------------
+# --------------------------------------------------
+# Buy / Sell Recommendation
+# --------------------------------------------------
 
 st.subheader("💡 AI Recommendation")
 
-if probability > 0.7 and prediction == 1:
+if probability > 0.75 and prediction == 1:
     st.success("🟢 Strong BUY Signal")
-elif probability > 0.6 and prediction == 1:
+elif probability > 0.60 and prediction == 1:
     st.info("🟡 BUY")
-elif probability > 0.6 and prediction == 0:
+elif probability > 0.60 and prediction == 0:
     st.warning("🟠 SELL")
 else:
     st.error("🔴 Strong SELL Signal")
 
-# ------------------------------
-# Interactive Plotly Chart
-# ------------------------------
+# --------------------------------------------------
+# Interactive Candlestick Chart
+# --------------------------------------------------
 
 st.subheader("📉 Interactive Stock Chart")
 
@@ -138,10 +166,10 @@ fig = go.Figure()
 
 fig.add_trace(go.Candlestick(
     x=data.index,
-    open=data['Open'],
-    high=data['High'],
-    low=data['Low'],
-    close=data['Close']
+    open=data["Open"],
+    high=data["High"],
+    low=data["Low"],
+    close=data["Close"]
 ))
 
 fig.update_layout(
