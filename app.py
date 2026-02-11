@@ -14,7 +14,7 @@ st.set_page_config(page_title="AI Investment Dashboard", layout="wide")
 st.title("📈 AI Investment Advisor Dashboard")
 
 # --------------------------------------------------
-# Sidebar
+# Sidebar Controls
 # --------------------------------------------------
 
 st.sidebar.header("Controls")
@@ -36,7 +36,7 @@ model_choice = st.sidebar.selectbox(
 )
 
 # --------------------------------------------------
-# Download Data
+# Download Data (5 Years)
 # --------------------------------------------------
 
 with st.spinner("Fetching stock data..."):
@@ -44,6 +44,16 @@ with st.spinner("Fetching stock data..."):
 
 if data.empty:
     st.error("Failed to fetch stock data. Try another stock.")
+    st.stop()
+
+# Fix MultiIndex columns issue (IMPORTANT)
+if isinstance(data.columns, pd.MultiIndex):
+    data.columns = data.columns.get_level_values(0)
+
+# Ensure required columns exist
+required_cols = ["Open", "High", "Low", "Close"]
+if not all(col in data.columns for col in required_cols):
+    st.error("Stock data missing required price columns.")
     st.stop()
 
 # --------------------------------------------------
@@ -71,10 +81,7 @@ data["Target"] = np.where(data["Return"].shift(-1) > 0, 1, 0)
 
 data = data.dropna()
 
-# --------------------------------------------------
-# Safety Checks
-# --------------------------------------------------
-
+# Safety check
 if len(data) < 200:
     st.error("Not enough data to train model. Try another stock.")
     st.stop()
@@ -85,20 +92,16 @@ X = data[features]
 y = data["Target"]
 
 if X.empty or y.empty:
-    st.error("Feature generation failed. Try another stock.")
+    st.error("Feature generation failed.")
     st.stop()
 
 # --------------------------------------------------
 # Train-Test Split
 # --------------------------------------------------
 
-try:
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, shuffle=False
-    )
-except ValueError:
-    st.error("Data split failed. Try another stock.")
-    st.stop()
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, shuffle=False
+)
 
 # --------------------------------------------------
 # Model Selection
@@ -109,7 +112,7 @@ if model_choice == "Logistic Regression":
 elif model_choice == "Random Forest":
     model = RandomForestClassifier()
 else:
-    model = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
+    model = XGBClassifier(use_label_encoder=False, eval_metric="logloss")
 
 model.fit(X_train, y_train)
 
@@ -142,7 +145,7 @@ with col2:
         st.error(f"📉 DOWN ({round(probability * 100, 2)}% confidence)")
 
 # --------------------------------------------------
-# Buy / Sell Recommendation
+# AI Recommendation Logic
 # --------------------------------------------------
 
 st.subheader("💡 AI Recommendation")
@@ -157,20 +160,18 @@ else:
     st.error("🔴 Strong SELL Signal")
 
 # --------------------------------------------------
-# Interactive Candlestick Chart
+# Candlestick Chart (Fully Safe)
 # --------------------------------------------------
 
 st.subheader("📉 Interactive Stock Chart")
 
-fig = go.Figure()
-
-fig.add_trace(go.Candlestick(
+fig = go.Figure(data=[go.Candlestick(
     x=data.index,
     open=data["Open"],
     high=data["High"],
     low=data["Low"],
     close=data["Close"]
-))
+)])
 
 fig.update_layout(
     xaxis_rangeslider_visible=False,
